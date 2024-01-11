@@ -1,26 +1,10 @@
 #IMPORTING LIBRARIES
-
-import scipy.special as sp # UNUSED?
 import numpy as np # NumPy offers comprehensive mathematical functions, random number generators, linear algebra routines, Fourier transforms, and more
-import matplotlib.pyplot as plt # Provides a MATLAB-like way of plotting
 import pandas as pd # Data analysis and manipulation tool. Used to read in bathymetry data (M77T file), Directions data (excel file), and organises Vmean into a labelled data structure
 # M77T data files are created from raw data collected by marine researchers using InfoBank
-from scipy.interpolate import CubicSpline as SP # Used to create a spline about the velocity, shape parameter and proability data
-from scipy.optimize import minimize,least_squares,Bounds,basinhopping # Optimizing and route finding
 from scipy.special import gamma # Gamma function used for weibull distribution
-import matplotlib.cm as cm # UNUSED?
-from Boruvka_Mod import Graph # imports class graph from Boruvka_Mod python file
-import utm # Used to help convert latitude and longitude in bathymetry data to centred eastings and northings
-import scipy.interpolate as spline # Used to smooth the bathymetry data
-from matplotlib.colors import ListedColormap # UNUSED?
 import math # Provides access to the mathematical functions
 from time import perf_counter # Returns the float value of time in seconds. Used to record run time for clustering and optimization algorithms
-from minmax_kmeans import minsize_kmeans # imports minsize_kmeans function from minmax_kmeans python file
-import pulp #Used in the clustering algorithm to generate MPS and LP files
-import scipy.signal as signal 
-from scipy.signal import savgol_filter
-from scipy.interpolate import make_interp_spline, BSpline
-from scipy.spatial import ConvexHull
 from GP_functions1 import GP_train, GP_predict
 
 import pygad
@@ -28,7 +12,7 @@ import warnings
 warnings.filterwarnings('ignore')
 
 
-
+print("TOP OF MAIN FILE")
 
 from GENETICFUNCTIONS import GeneticFunctions
 genetic = GeneticFunctions()
@@ -36,7 +20,21 @@ genetic = GeneticFunctions()
 import parameters as p
 
 
+
+
+# TRAIN MODEL and assign to predicting class
+#name = "all_dataset.csv"
+#training_class = GP_train() # create training class
+#print("BEFORE MACHINE LEARNED")
+#training_model = training_class.train_model() # trains model on "all_dataset.csv"
+#print("AFTER MACHINE LEARNED")
+# CREATE PREDICTING CLASS from which attenuation predictions are made
+
+#predict_class = GP_predict(training_model) # create predicting class
+
+
 initialPopulation,xGrid,yGrid = genetic.initialPositions(p.xDimension,p.yDimension,p.numTurbs,p.solPerPopTest)
+
 
 # Import FunctionToCall, then use FunctionTocall.function
 
@@ -44,10 +42,8 @@ initialPopulation,xGrid,yGrid = genetic.initialPositions(p.xDimension,p.yDimensi
 # Job script is in shell script, which calls the .py file.
 
 
-#READING IN BATHYMETRY DATA
-data = pd.read_csv("nsea86.m77t", sep='\t') # Reads in all data from file including depth data, lattitude, longitude etc.
-mindepth = min(data['CORR_DEPTH']) # Retrieves minimum depth value from data file 'nsea86.m77t'    
-print('Shallowest depth:', mindepth, 'm') #Prints out the result for the smallest depth value
+
+
 
 maxnodespertree = p.maximumturbinespertree
 
@@ -86,7 +82,6 @@ LandCost = genetic.LandAreaCost(positionlist,ExportDistance)
 t1_start = perf_counter() # Starts timer
 indiceslist,u_labels,label = genetic.clustering_algorithm(positionlist,p.numTurbs,maxnodespertree) #Executes clustering algorithm
 t1_stop = perf_counter() # Ends timer
-print('Function run time:', t1_stop-t1_start) # Prints algorithm run time
 
 MSTweight=genetic.Minimum_Spanning_Tree(genetic.geom_analysis(positionlist, indiceslist)[0],indiceslist)
 links = [None] * math.ceil(p.numTurbs/maxnodespertree)
@@ -94,25 +89,9 @@ MSTWeightSum = 0 #MST weight is simply the total length of cabling used
 
 for a in range(0,math.ceil(p.numTurbs/maxnodespertree)):
     MSTWeightSum += MSTweight[a][0]
-    print('Each tree weight', 'tree',a+1 ,MSTweight[a][0])
     links[a] = MSTweight[a][1]
 
-#CONVERTS LATITUDE AND LONGITUDE IN BATHYMETRY DATA TO CENTERED EASTINGS AND NORTHINGS
 
-data['easting'] = data.apply(lambda row: utm.from_latlon(row['LAT'], row['LON'])[0], axis=1) #Converts lon/lat to easting and adds this onto the 'data' file
-data['northing'] = data.apply(lambda row: utm.from_latlon(row['LAT'], row['LON'])[1], axis=1) #Converts lon/lat to northing and adds this onto the 'data' file
-
-zero_east = min(data['easting']) + (max(data['easting']) - min(data['easting']))/2 +30000 # Determines centre of bathymrtry data in easting direction (+30,000 is simply to get a more interesting result from the current bathymetry data)
-zero_north = min(data['northing']) + (max(data['northing']) - min(data['northing']))/2 # Determines centre of bathymetry data in northing direction   
-
-data['centered_easting'] = data['easting'] - zero_east # Centres the data about (0,0) and adds this onto the 'data' file
-data['centered_northing'] = data['northing'] - zero_north # Centres the data about (0,0) and adds this onto the 'data' file
-
-
-maxdepth = max(data['CORR_DEPTH'])
-levels = np.linspace(mindepth,maxdepth,24) # Creates 24 even spaces or levels between the min and max depth
-
-smooth = spline.SmoothBivariateSpline(data['centered_easting'], data['centered_northing'], data['CORR_DEPTH'], s = 25000)
 
 #SETTING MODEL PARAMETERS
 
@@ -134,16 +113,16 @@ model=np.array((1.39998719e-01, 8.51483871e+00, 2.62613638e+03))
 ws=2.0 #weibull scale factor
 wei_gamma=gamma(1.+1./ws)
 
-Pr = 2*10**6 #Rated Power for Horns Rev 1 Turbines. Max power output [Watts]
-Vc = 4.0 #Cut-in Velocity. Starts producing energy at wind speed of 4m/s [m/s]
-Vr = 15.0 #Rated Velocity. Starts producing max energy at 15m/s
-Vf = 25.0 #Cut-off Velocity. Turbines cut out at wind speeds of 25m/s to prevent damage to the turbines.
-k = 2.0 #Weibull shape parameter
-(Pr,Vc,Vr,k)
+# Pr = 2.0e+06 #Rated Power for Horns Rev 1 Turbines. Max power output [Watts]
+# Vc = 4.0 #Cut-in Velocity. Starts producing energy at wind speed of 4m/s [m/s]
+# Vr = 15.0 #Rated Velocity. Starts producing max energy at 15m/s
+# Vf = 25.0 #Cut-off Velocity. Turbines cut out at wind speeds of 25m/s to prevent damage to the turbines.
+# k = 2.0 #Weibull shape parameter
+# (Pr,Vc,Vr,k)
 
-#interpolation parameters
-dvel=1.5 #[m/s]
-dang=1. #[degrees]
+# #interpolation parameters
+# dvel=1.5 #[m/s]
+# dang=1. #[degrees]
 
 #DETERMINING WIND DIRECTION AND VELOCITY AT HORNS REV 1
 
@@ -193,17 +172,14 @@ rotangles=np.mod(angle-windangle+180,360)-180
 
 values = genetic.att(p.r,np.mod(p.theta+np.pi,np.pi*2)-np.pi,model) # gets angles from -pi to pi, not from 0 to 2pi.
 
-# TRAIN MODEL and assign to predicting class
-name = "all_dataset.csv"
-training_class = GP_train() # create training class
-training_model = training_class.train_model() # trains model on "all_dataset.csv"
 
-# CREATE PREDICTING CLASS from which attenuation predictions are made
-predict_class = GP_predict(training_model) # create predicting class
 
-velocities=np.arange(Vc,Vf,dvel) # 1D array ranging from Vc to Vf in dvel intervals. 4 to 25 in steps of 1.5
-angles=np.arange(0,360,dang) # 0 to 360 with intervals of dang.
-wsp=genetic.windspeedprobability(angles,velocities,dang,dvel) # tells probability of getting wind from a certain direction with a certain velocity.
+
+
+
+# velocities=np.arange(Vc,Vf,dvel) # 1D array ranging from Vc to Vf in dvel intervals. 4 to 25 in steps of 1.5
+# angles=np.arange(0,360,dang) # 0 to 360 with intervals of dang.
+# wsp=genetic.windspeedprobability(angles,velocities,dang,dvel) # tells probability of getting wind from a certain direction with a certain velocity.
 # sum of all numbers would add up to 1.
 #plt.plot(x,y)
 
@@ -214,21 +190,21 @@ wsp=genetic.windspeedprobability(angles,velocities,dang,dvel) # tells probabilit
 # constant until cut-off velocity of 25m/s.
 
 #cubic Based Power output
-a=Pr/(Vr**3-Vc**3)
-b=Vc**3/(Vr**3-Vc**3)
+# a=Pr/(Vr**3-Vc**3)
+# b=Vc**3/(Vr**3-Vc**3)
 
 
 
 
-x=np.arange(0,25,0.1)
-POvec=np.vectorize(genetic.q) # vectorises power output function q (from cell above).
-y=POvec(x)
+# x=np.arange(0,25,0.1)
+# POvec=np.vectorize(genetic.q) # vectorises power output function q (from cell above).
+# y=genetic.POvec(x)
 
 # PLOTS TURBINE POWER CURVE
 # Nothing needed??
 
-wsr=genetic.windspeedreduction(positionlist[1:,:],angles,predict_class)
-powout=genetic.power(wsr,velocities)
+wsr=genetic.windspeedreduction(positionlist[1:,:],angles,genetic.predict_class)
+powout=genetic.power(wsr,genetic.velocities)
 
 # EXPECTED TURBINE OUTPUT (Watts) for the given wind distribution and positions.
 # Can be seen that top left (NW) produces most energy for Horns Rev 1 Wind Farm.
@@ -238,8 +214,7 @@ powout=genetic.power(wsr,velocities)
 # values and sum to find the expected power.
 # Sum up this value for all turbines to find total wind farm expected power output.
 output=np.zeros((p.numTurbs)) 
-output=np.tensordot(powout,wsp,2)
-print(output,np.shape(output),np.sum(output))
+output=np.tensordot(powout,genetic.wsp,2)
 # last output is total power output in Watts.
 
 # TURBINE OUTPUT (Watts) WITH NO INTERFERENCE
@@ -247,17 +222,16 @@ print(output,np.shape(output),np.sum(output))
 #Reference output:
 # Same calculations as cell above except each turbine sees the full amount of wind every time
 # (i.e. no wind reduction from other turbines).
-refpowout=genetic.power(np.ones((p.numTurbs,np.size(angles))),velocities)
+refpowout=genetic.power(np.ones((p.numTurbs,np.size(genetic.angles))),genetic.velocities)
 refoutput=np.zeros((p.numTurbs))
-refoutput=np.tensordot(refpowout,wsp,axes=2)
-print(refoutput,np.shape(refoutput),np.sum(refoutput))
+refoutput=np.tensordot(refpowout,genetic.wsp,axes=2)
 
 # last output is total power output in Watts.
 
 distance,angle,distance_global, angle_global = genetic.geom_analysis(positionlist,indiceslist)
-wsr=genetic.windspeedreduction(positionlist[1:,:],angles,predict_class)
-powout=genetic.power(wsr,velocities) # total output power
-output=np.tensordot(powout,wsp,axes=2)
+wsr=genetic.windspeedreduction(positionlist[1:,:],angles,genetic.predict_class)
+powout=genetic.power(wsr,genetic.velocities) # total output power
+output=np.tensordot(powout,genetic.wsp,axes=2)
 
 df = pd.DataFrame(data={'No. Turbines':[],
                         'Generation':[],
@@ -283,7 +257,7 @@ t1_start = perf_counter()
 
 
 
-wsp=genetic.windspeedprobability(angles,velocities,dang,dvel) # tells probability of getting wind from a certain direction with a certain velocity.
+# wsp=genetic.windspeedprobability(angles,velocities,dang,dvel) # tells probability of getting wind from a certain direction with a certain velocity.
 
 
 
@@ -292,8 +266,10 @@ wsp=genetic.windspeedprobability(angles,velocities,dang,dvel) # tells probabilit
 
 
 # This for loop allows for multiple tests to be executed consecutively
+print(p.numTests)
 for test in range(0,p.numTests):
-    print(f"Simulation {test+1} of {p.numTests} completion:")
+    print("START OF TESTS FOR LOOP")
+    #print(f"Simulation {test+1} of {p.numTests} completion:")
     
     # Access the algorithm characteristics from the relevant lists
     numGenerationsTest = p.numGenerations[test]
@@ -331,7 +307,7 @@ totaltime = t1_stop - t1_start # total run time in secondspositionlist = solutio
 print(totaltime)
 
 # Output the df to a file such as Test-10-1.csv
-df.to_csv('Test-'+str(p.numTurbs)+'-'+str(windangle)+'.csv',index=False)
+#df.to_csv('Test-'+str(p.numTurbs)+'-'+str(windangle)+'.csv',index=False)
 
 # DEBUGGING TEST FOR TURBINE CLASHES
 for turb in range(0,p.numTurbs+1):
@@ -341,3 +317,4 @@ for turb in range(0,p.numTurbs+1):
             print("TURBINE ON TOP --- FAIL")
             
 print(solution_fitness)
+print("TEST COMPLETE")

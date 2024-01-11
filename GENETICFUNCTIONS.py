@@ -37,6 +37,19 @@ import parameters as p
 class GeneticFunctions:  
     def __init__(self):
         self.POvec=np.vectorize(self.q)
+        # TRAIN MODEL and assign to predicting class
+        #name = "all_dataset.csv"
+        self.training_class = GP_train() # create training class
+        print("BEFORE MACHINE LEARNED")
+        self.training_model = self.training_class.train_model() # trains model on "all_dataset.csv"
+        print("AFTER MACHINE LEARNED")
+        # CREATE PREDICTING CLASS from which attenuation predictions are made
+
+        self.predict_class = GP_predict(self.training_model) # create predicting class
+
+        self.velocities=np.arange(p.Vc,p.Vf,p.dvel) # 1D array ranging from Vc to Vf in dvel intervals. 4 to 25 in steps of 1.5
+        self.angles=np.arange(0,360,p.dang) # 0 to 360 with intervals of dang.
+        self.wsp=self.windspeedprobability(self.angles,self.velocities,p.dang,p.dvel) # tells probability of getting wind from a certain direction with a certain velocity.
         return
 
     def a(x,y):
@@ -334,6 +347,28 @@ class GeneticFunctions:
 
     def foundations(self,positionlist):
         
+        Depthx = range(0,math.ceil((max(p.data['CORR_DEPTH']))),1)
+        GBCost = [None] * len(Depthx)
+        MPCost = [None] * len(Depthx)
+        JCost = [None] * len(Depthx)
+        TLCost = [None] * len(Depthx)
+        Depth = 0
+
+        for i in Depthx:
+            GBCost[i] = self.foundationDepthCost(p.GravityBase,Depth)
+            MPCost[i] = self.foundationDepthCost(p.Monopile,Depth)
+            JCost[i] = self.foundationDepthCost(p.Jacket,Depth)
+            TLCost[i] = p.TensionLeg
+            Depth += 1
+        
+        GBCost2 = GBCost[Depthx[0]:Depthx[15]]
+        MPCost2 = MPCost[Depthx[15]:Depthx[30]]
+        JCost2 = JCost[Depthx[30]:Depthx[60]]
+        TLCost2 = TLCost[Depthx[60]:max(Depthx)]
+        
+        GBMPJTL = GBCost2+MPCost2+JCost2+TLCost2
+        smoothed_2dg = savgol_filter(GBMPJTL, window_length = 9, polyorder = 1)
+        
         DepthPerTurbine = [None] * (len(positionlist)-1) # none defines a null/no value. Get a null list the size of the np. turbines
         FoundationCost = [None] * (len(positionlist)-1) # Get a null list the size of the number of turbines
         FoundationCostTotal = 0 # Assigns initial value to variable
@@ -406,7 +441,8 @@ class GeneticFunctions:
         
         # Output the progress of the GA
         percDone = int(ga_instance.generations_completed/p.numGenerationsTest*100)
-        print(f"{percDone}%",end="\r")
+        print("Fitness Checking Gen :",ga_instance.generations_completed)
+        #print(f"{percDone}%",end="\r")
         
         # Cluster the turbines
         indiceslist,u_labels,label = self.clustering_algorithm(positionlist,p.numTurbs,p.maxnodespertree) # calls clustering function
@@ -420,6 +456,7 @@ class GeneticFunctions:
                 for col in range(0,len(distance[cluster])):
                     if distance[cluster][row][col] < p.minTurbGap:
                         # If too close, give a very bad fitness
+                        print("TOO CLOSE")
                         return eliminatedSolution  
     
         
@@ -441,24 +478,31 @@ class GeneticFunctions:
         LandCost = self.LandAreaCost(positionlist,ExportDistance)
         TotalCost= TurbineCostTotal+DepthCostAll+MaintenanceCosts+FixedCost+LandCost+CableCost+ExportCableCost+FoundationCostTotal 
             
-        
+        #from CALLGA import predict_class
+        print("IMPORTED PREDICT CLASS")
         # Calculate the power production of the wind farm
-        wsr=self.windspeedreduction(positionlist[1:,:],p.angles,predict_class) # calls wake attenuation function
+        wsr=self.windspeedreduction(positionlist[1:,:],p.angles,self.predict_class) # calls wake attenuation function
         powout=self.power(wsr,p.velocities) # total output power
-        output=np.tensordot(powout,p.wsp,axes=2) # reduced power output due to wake effects                         
+        
+        #from CALLGA import wsp
+        output=np.tensordot(powout,self.wsp,axes=2) # reduced power output due to wake effects                         
         CostperWatt = TotalCost/(np.sum(output))
         
         
         # Check to see if the budget has been upheld
         if TotalCost > p.budget:
             # If over budget, give a very bad fitness
+            print("OVERBUDGET")
             return eliminatedSolution * CostperWatt
         
-        
+        print("VALID SOLUTION")
+        print(CostperWatt)
         # If solution is valid, return the cost/watt as the fitness
         return -CostperWatt
 
 
 
+
+print("RUNNING AT END OF FUNCTIONS FILE FOR SOME REASON")
 
 
