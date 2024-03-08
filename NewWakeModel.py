@@ -17,7 +17,6 @@ from GP_functions1 import GP_train, GP_predict
 import pygad
 import warnings
 import parameters as p
-
 warnings.filterwarnings('ignore')
 
 
@@ -25,7 +24,7 @@ numTurbs = p.numTurbs
 numGenerationsTest = p.numGenerationsTest
 xDimension = p.xDimension
 yDimension = p.yDimension
-xRange = range(0, xDimension)
+xRange = range(-xDimension, xDimension)
 minTurbGap = p.minTurbGap
 
 
@@ -315,7 +314,6 @@ MSTWeightSum = 0 #MST weight is simply the total length of cabling used
 
 for a in range(0,math.ceil(numTurbs/maxnodespertree)):
     MSTWeightSum += MSTweight[a][0]
-    #print('Each tree weight', 'tree',a+1 ,MSTweight[a][0])
     links[a] = MSTweight[a][1]
     
     for b in links[a]:
@@ -402,7 +400,7 @@ k = 2.0 #Weibull shape parameter
 
 #interpolation parameters
 dvel=1.5 #[m/s]
-dang=1. #[degrees]
+dang=p.windDev #[degrees]
 
 
 
@@ -996,33 +994,33 @@ def minimumSpanningTree(distance,numTurbs):
 
 
 
-
-
-
 def fitness_func(ga_instance, solution, solution_idx):
     positionlist = np.reshape(solution, (-1, 2))
-
-    # Give a very bad fitness to illegal solutions
-    eliminatedSolution = -100_000
-    
     # Output the progress of the GA
-    percDone = int(ga_instance.generations_completed/numGenerationsTest*100)
-    print(f"{percDone}%",end="\r")
+    #percDone = int(ga_instance.generations_completed/numGenerationsTest*100)
+    #print(f"{percDone}%",end="\r")
     
+    # Give a very bad fitness to illegal solutions
+    penalty = 1000
+    cumPenalty = 0 
+    
+    for i in range (1, len(positionlist)):
+        for j in range (i+1,len(positionlist)):
+            distance = np.sqrt(((positionlist[i,0]-positionlist[j,0])**2)+((positionlist[i,1]-positionlist[j,1])**2))
+            if distance < 300:
+                cumPenalty = cumPenalty + (300 - distance)
+              
+    if cumPenalty > 0:
+        cumPenalty+=penalty
+        return -cumPenalty
+        
+        
+                
     # Cluster the turbines
     indiceslist,u_labels,label = clustering_algorithm(positionlist,numTurbs,maxnodespertree) # calls clustering function
     distance,angle,distance_global,angle_global = geom_analysis(positionlist,indiceslist) # calls pre-MST function         
     
     clusters = round(math.ceil(numTurbs/maximumturbinespertree))
-    
-    # Check to see if the turbines are too close
-    for cluster in range(0,round(math.ceil(numTurbs/maximumturbinespertree))):
-        for row in range(0,len(distance[cluster])):
-            for col in range(0,len(distance[cluster])):
-                if distance[cluster][row][col] < minTurbGap:
-                    # If too close, give a very bad fitness
-                    return eliminatedSolution  
-
     
     # Calculate the length of cabling required
     MSTweight=Minimum_Spanning_Tree(distance,indiceslist)
@@ -1047,17 +1045,7 @@ def fitness_func(ga_instance, solution, solution_idx):
     wsr=windspeedreduction(positionlist[1:,:],angles,predict_class) # calls wake attenuation function
     powout=power(wsr,velocities) # total output power
     output=np.tensordot(powout,wsp,axes=2) # reduced power output due to wake effects                         
-    CostperWatt = TotalCost/(np.sum(output))  
-    
-    
-    # Check to see if the budget has been upheld
-    if TotalCost > budget:
-        # If over budget, give a very bad fitness
-        return eliminatedSolution * CostperWatt
-        # Multiply by CostperWatt so that if all solutions are overbudget, the best will still be found
-        
-        #THIS SHOULD BE CHANGED TO ACCOUNT FOR THE FLAGRANCE OF THE OVERSPEND
-        #COME UP WITH SOME EQUATION, PROBS INVOLVES EXPONENTIAL OF OVERSPEND????
+    CostperWatt = TotalCost/(np.sum(output))
     
     
     # If solution is valid, return the cost/watt as the fitness
@@ -1068,6 +1056,8 @@ fitness_function = fitness_func
 # +1 to account for the substation position
 # *2 for x and y coordinate for each
 num_genes = (numTurbs + 1) * 2
+init_range_low = -xDimension
+init_range_high = xDimension
 
 
 # Determines the type of genetic algorithm used
@@ -1083,19 +1073,22 @@ mutation_type = "random"
 
 
 # Define the operation of the instance of the genetic algorithm
+ga_instance = pygad.GA# Define the operation of the instance of the genetic algorithm
 ga_instance = pygad.GA(num_generations=numGenerationsTest,
-                   num_parents_mating=numParentsMating,
-                   fitness_func=fitness_function,
-                   sol_per_pop=solPerPopTest,
-                   parent_selection_type=parent_selection_type,
-                   keep_parents=keepParents,
-                   crossover_type=crossover_type,
-                   mutation_type=mutation_type,
-                   mutation_percent_genes=mutationPercentGenesTest,
-                   gene_space=xRange,
-                   initial_population=initialPopulation,
-                   save_best_solutions=False,
-                   parallel_processing=p.cores) 
+                       num_parents_mating=numParentsMating,
+                       num_genes=num_genes,
+                       fitness_func=fitness_function,
+                       sol_per_pop=solPerPopTest,
+                       init_range_low=init_range_low,
+                       init_range_high=init_range_high,
+                       parent_selection_type=parent_selection_type,
+                       keep_parents=keepParents,
+                       crossover_type=crossover_type,
+                       mutation_type=mutation_type,
+                       mutation_percent_genes=mutationPercentGenesTest,
+                       gene_space=xRange,
+                       #initial_population=initialPopulation,                      
+                       save_best_solutions=False) 
 
 
 t1_start = perf_counter() # Ends timer
@@ -1109,11 +1102,9 @@ solutionCoords = np.array(solutionCoords)
 
 t1_stop = perf_counter() # Ends timer
 opTime = t1_stop-t1_start
-print('Optimisation:',opTime) # Prints algorithm run time
 
 # Set the position list to be the optimal layout
 positionlist = solutionCoords
-print(positionlist)
 
 
 # Perform the same calculations as fitness function for the optimal solution alone
@@ -1169,18 +1160,5 @@ df = pd.DataFrame({'No. Turbines':[numTurbs],
                     'Turbine Coords':[positionlist]})
 
 # Output the df to a file such as Test-10-1.csv
-df.to_csv('Test-'+str(numTurbs)+'-'+str(windangle)+'.csv',index=False)
-
-
-# In[ ]:
-
-
-# DEBUGGING TEST FOR TURBINE CLASHES
-for turb in range(0,numTurbs+1):
-    for checked in range(0,turb):
-        if positionlist[turb][0] == positionlist[checked][0] and positionlist[turb][1] == positionlist[checked][1]:
-            #If a turbine is too close, set the fitness to be very bad
-            print("TURBINE ON TOP --- FAIL")
-            
-print(solution_fitness)
+df.to_csv('Test-'+str(numTurbs)+'-'+str(dang)+'-'+str(mutationPercentGenesTest)+'.csv',index=False)
 
